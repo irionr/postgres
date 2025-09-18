@@ -13738,3 +13738,177 @@ get_range_partbound_string(List *bound_datums)
 
 	return buf->data;
 }
+
+
+/*
+ * Helper function to scan domain constraints
+ */
+static void
+scan_domain_constraints(Oid domain_oid, List **validcons, List **invalidcons)
+{
+	Relation	constraintRel;
+	SysScanDesc sscan;
+	ScanKeyData skey;
+	HeapTuple	constraintTup;
+
+	*validcons = NIL;
+	*invalidcons = NIL;
+
+	constraintRel = table_open(ConstraintRelationId, AccessShareLock);
+
+	ScanKeyInit(&skey,
+				Anum_pg_constraint_contypid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(domain_oid));
+
+	sscan = systable_beginscan(constraintRel,
+							   ConstraintTypidIndexId,
+							   true,
+							   NULL,
+							   1,
+							   &skey);
+
+	while (HeapTupleIsValid(constraintTup = systable_getnext(sscan)))
+	{
+		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(constraintTup);
+
+		if (con->convalidated)
+			*validcons = lappend_oid(*validcons, con->oid);
+		else
+			*invalidcons = lappend_oid(*invalidcons, con->oid);
+	}
+
+	systable_endscan(sscan);
+	table_close(constraintRel, AccessShareLock);
+}
+
+/*
+ * Helper function to build CREATE DOMAIN statement
+ */
+static void
+build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
+							 Node *defaultExpr, List *validConstraints)
+{
+	HeapTuple	baseTypeTuple;
+	Form_pg_type baseTypeForm;
+	Oid			baseCollation = InvalidOid;
+	ListCell   *lc;
+
+	appendStringInfo(buf, "CREATE DOMAIN %s.%s AS %s",
+					 quote_identifier(get_namespace_name(typForm->typnamespace)),
+					 quote_identifier(NameStr(typForm->typname)),
+					 format_type_be(typForm->typbasetype));
+
+	/* Add collation if it differs from base type's collation */
+	if (OidIsValid(typForm->typcollation))
+	{
+		/* Get base type's collation for comparison */
+		baseTypeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typForm->typbasetype));
+		if (HeapTupleIsValid(baseTypeTuple))
+		{
+			baseTypeForm = (Form_pg_type) GETSTRUCT(baseTypeTuple);
+			baseCollation = baseTypeForm->typcollation;
+			ReleaseSysCache(baseTypeTuple);
+		}
+
+		/* Only add COLLATE if domain's collation differs from base type's */
+		if (typForm->typcollation != baseCollation)
+		{
+			appendStringInfo(buf, " COLLATE %s",
+							 generate_collation_name(typForm->typcollation));
+		}
+	}
+
+	/* Add default value if present */
+	if (defaultExpr != NULL)
+	{
+		char *defaultValue = deparse_expression_pretty(defaultExpr, NIL, false, false, 0, 0);
+		appendStringInfo(buf, " DEFAULT %s", defaultValue);
+	}
+
+	/* Add valid constraints */
+	foreach(lc, validConstraints)
+	{
+		Oid			constraintOid = lfirst_oid(lc);
+		HeapTuple	constraintTup;
+		Form_pg_constraint con;
+		char	   *constraintDef;
+
+		/* Look up the constraint info */
+		constraintTup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constraintOid));
+		if (!HeapTupleIsValid(constraintTup))
+			continue;	/* constraint was dropped concurrently */
+
+		con = (Form_pg_constraint) GETSTRUCT(constraintTup);
+		constraintDef = pg_get_constraintdef_worker(constraintOid, false, PRETTYFLAG_PAREN, true);
+
+		appendStringInfo(buf, " CONSTRAINT %s %s",
+						 quote_identifier(NameStr(con->conname)),
+						 constraintDef);
+
+		ReleaseSysCache(constraintTup);
+	}
+
+	appendStringInfoChar(buf, ';');
+}
+
+/*
+ * Helper function to add ALTER DOMAIN statements for invalid constraints
+ */
+static void
+add_alter_domain_statements(StringInfo buf, List *invalidConstraints)
+{
+	ListCell *lc;
+
+	foreach(lc, invalidConstraints)
+	{
+		Oid constraintOid = lfirst_oid(lc);
+		char *alterStmt = pg_get_constraintdef_worker(constraintOid, true, PRETTYFLAG_PAREN, true);
+
+		if (alterStmt)
+			appendStringInfo(buf, "\n%s;", alterStmt);
+	}
+}
+
+/*
+ * pg_get_domain_ddl - Get CREATE DOMAIN statement for a domain
+ */
+Datum
+pg_get_domain_ddl(PG_FUNCTION_ARGS)
+{
+	StringInfoData buf;
+	Oid			domain_oid = PG_GETARG_OID(0);
+	HeapTuple	typeTuple;
+	Form_pg_type typForm;
+	Node	   *defaultExpr;
+	List	   *validConstraints;
+	List	   *invalidConstraints;
+
+	/* Look up the domain in pg_type */
+	typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(domain_oid));
+	if (!HeapTupleIsValid(typeTuple))
+		PG_RETURN_NULL();
+
+	typForm = (Form_pg_type) GETSTRUCT(typeTuple);
+
+	/* Get default expression */
+	defaultExpr = get_typdefault(domain_oid);
+
+	/* Scan for valid and invalid constraints */
+	scan_domain_constraints(domain_oid, &validConstraints, &invalidConstraints);
+
+	/* Build the DDL statement */
+	initStringInfo(&buf);
+	build_create_domain_statement(&buf, typForm, defaultExpr, validConstraints);
+
+	/* Add ALTER DOMAIN statements for invalid constraints */
+	if (list_length(invalidConstraints) > 0)
+		add_alter_domain_statements(&buf, invalidConstraints);
+
+	/* Cleanup */
+	list_free(validConstraints);
+	list_free(invalidConstraints);
+	ReleaseSysCache(typeTuple);
+
+	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
+}
