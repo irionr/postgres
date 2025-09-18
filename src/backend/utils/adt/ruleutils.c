@@ -13709,3 +13709,79 @@ get_range_partbound_string(List *bound_datums)
 
 	return buf->data;
 }
+
+
+/*
+ * pg_get_domain_ddl - Get CREATE DOMAIN statement for a domain
+ */
+Datum
+pg_get_domain_ddl(PG_FUNCTION_ARGS)
+{
+	StringInfoData buf;
+	Oid			domain_oid = PG_GETARG_OID(0);
+	HeapTuple	typeTuple;
+	Form_pg_type typForm;
+	Datum		defaultDatum;
+	bool		defaultIsNull;
+	Relation	constraintRel;
+	SysScanDesc constraintScan;
+	ScanKeyData constrintSkey;
+	HeapTuple	constraintTup;
+
+	/* Look up the domain in pg_type */
+	typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(domain_oid));
+
+	/* function param is a regtype, so typeoid must be valid */
+	Assert(HeapTupleIsValid(typeTuple));
+
+	typForm = (Form_pg_type) GETSTRUCT(typeTuple);
+	initStringInfo(&buf);
+	appendStringInfo(&buf, "CREATE DOMAIN ");
+	appendStringInfo(&buf, "%s.", quote_identifier(get_namespace_name(typForm->typnamespace)));
+	appendStringInfo(&buf, "%s AS ", quote_identifier(NameStr(typForm->typname)));
+	appendStringInfo(&buf, "%s", format_type_be(typForm->typbasetype));
+
+	/*
+	 * "default" is a variable length field so we can't just get it from the
+	 * struct
+	 */
+	defaultDatum = SysCacheGetAttr(TYPEOID, typeTuple,
+								   Anum_pg_type_typdefault, &defaultIsNull);
+	if (!defaultIsNull)
+	{
+		char	   *defaultValue = TextDatumGetCString(defaultDatum);
+
+		appendStringInfo(&buf, " DEFAULT %s", defaultValue);
+	}
+
+	/* table scan to look up constraints belonging to this domain */
+	constraintRel = table_open(ConstraintRelationId, AccessShareLock);
+
+	ScanKeyInit(&constrintSkey,
+				Anum_pg_constraint_contypid,
+				BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(domain_oid));
+
+	constraintScan = systable_beginscan(constraintRel,
+										ConstraintTypidIndexId,
+										true,
+										NULL,
+										1,
+										&constrintSkey);
+
+	while (HeapTupleIsValid(constraintTup = systable_getnext(constraintScan)))
+	{
+		Form_pg_constraint con = (Form_pg_constraint) GETSTRUCT(constraintTup);
+		char	   *val = NULL;
+
+		val = pg_get_constraintdef_worker(con->oid, false, PRETTYFLAG_PAREN, true);
+		appendStringInfo(&buf, " CONSTRAINT %s %s", quote_identifier(NameStr(con->conname)), val);
+	}
+	systable_endscan(constraintScan);
+	table_close(constraintRel, AccessShareLock);
+	ReleaseSysCache(typeTuple);
+
+	appendStringInfo(&buf, ";");
+
+	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
+}
