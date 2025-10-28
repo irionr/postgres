@@ -546,6 +546,7 @@ static void get_json_table_nested_columns(TableFunc *tf, JsonTablePlan *plan,
 										  deparse_context *context,
 										  bool showimplicit,
 										  bool needcomma);
+static char *pg_get_domain_ddl_worker(Oid domain_oid, int prettyFlags);
 
 #define only_marker(rte)  ((rte)->inh ? "" : "ONLY ")
 
@@ -13787,7 +13788,7 @@ scan_domain_constraints(Oid domain_oid, List **validcons, List **invalidcons)
  */
 static void
 build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
-							 Node *defaultExpr, List *validConstraints)
+							  Node *defaultExpr, List *validConstraints, int prettyFlags)
 {
 	HeapTuple	baseTypeTuple;
 	Form_pg_type baseTypeForm;
@@ -13822,7 +13823,8 @@ build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
 	/* Add default value if present */
 	if (defaultExpr != NULL)
 	{
-		char *defaultValue = deparse_expression_pretty(defaultExpr, NIL, false, false, 0, 0);
+		char	   *defaultValue = deparse_expression_pretty(defaultExpr, NIL, false, false, prettyFlags, 0);
+
 		appendStringInfo(buf, " DEFAULT %s", defaultValue);
 	}
 
@@ -13837,7 +13839,7 @@ build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
 		/* Look up the constraint info */
 		constraintTup = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constraintOid));
 		if (!HeapTupleIsValid(constraintTup))
-			continue;	/* constraint was dropped concurrently */
+			continue;			/* constraint was dropped concurrently */
 
 		con = (Form_pg_constraint) GETSTRUCT(constraintTup);
 		constraintDef = pg_get_constraintdef_worker(constraintOid, false, PRETTYFLAG_PAREN, true);
@@ -13856,14 +13858,14 @@ build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
  * Helper function to add ALTER DOMAIN statements for invalid constraints
  */
 static void
-add_alter_domain_statements(StringInfo buf, List *invalidConstraints)
+add_alter_domain_statements(StringInfo buf, List *invalidConstraints, int prettyFlags)
 {
-	ListCell *lc;
+	ListCell   *lc;
 
 	foreach(lc, invalidConstraints)
 	{
-		Oid constraintOid = lfirst_oid(lc);
-		char *alterStmt = pg_get_constraintdef_worker(constraintOid, true, PRETTYFLAG_PAREN, true);
+		Oid			constraintOid = lfirst_oid(lc);
+		char	   *alterStmt = pg_get_constraintdef_worker(constraintOid, true, prettyFlags, true);
 
 		if (alterStmt)
 			appendStringInfo(buf, "\n%s;", alterStmt);
@@ -13876,8 +13878,40 @@ add_alter_domain_statements(StringInfo buf, List *invalidConstraints)
 Datum
 pg_get_domain_ddl(PG_FUNCTION_ARGS)
 {
-	StringInfoData buf;
 	Oid			domain_oid = PG_GETARG_OID(0);
+	char	   *res;
+
+	res = pg_get_domain_ddl_worker(domain_oid, 0);
+	if (res == NULL)
+		PG_RETURN_NULL();
+	PG_RETURN_TEXT_P(string_to_text(res));
+}
+
+/*
+ * pg_get_domain_ddl_ext - Get CREATE DOMAIN statement for a domain with pretty-print option
+ */
+Datum
+pg_get_domain_ddl_ext(PG_FUNCTION_ARGS)
+{
+	Oid			domain_oid = PG_GETARG_OID(0);
+	bool		pretty = PG_GETARG_BOOL(1);
+	char	   *res;
+	int			prettyFlags;
+
+	prettyFlags = GET_PRETTY_FLAGS(pretty);
+
+	res = pg_get_domain_ddl_worker(domain_oid, prettyFlags);
+	if (res == NULL)
+		PG_RETURN_NULL();
+	PG_RETURN_TEXT_P(string_to_text(res));
+}
+
+
+
+static char *
+pg_get_domain_ddl_worker(Oid domain_oid, int prettyFlags)
+{
+	StringInfoData buf;
 	HeapTuple	typeTuple;
 	Form_pg_type typForm;
 	Node	   *defaultExpr;
@@ -13887,9 +13921,12 @@ pg_get_domain_ddl(PG_FUNCTION_ARGS)
 	/* Look up the domain in pg_type */
 	typeTuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(domain_oid));
 	if (!HeapTupleIsValid(typeTuple))
-		PG_RETURN_NULL();
+		return NULL;
 
 	typForm = (Form_pg_type) GETSTRUCT(typeTuple);
+
+	elog(WARNING, "pretty flags are %i", prettyFlags);
+
 
 	/* Get default expression */
 	defaultExpr = get_typdefault(domain_oid);
@@ -13899,16 +13936,16 @@ pg_get_domain_ddl(PG_FUNCTION_ARGS)
 
 	/* Build the DDL statement */
 	initStringInfo(&buf);
-	build_create_domain_statement(&buf, typForm, defaultExpr, validConstraints);
+	build_create_domain_statement(&buf, typForm, defaultExpr, validConstraints, prettyFlags);
 
 	/* Add ALTER DOMAIN statements for invalid constraints */
 	if (list_length(invalidConstraints) > 0)
-		add_alter_domain_statements(&buf, invalidConstraints);
+		add_alter_domain_statements(&buf, invalidConstraints, prettyFlags);
 
 	/* Cleanup */
 	list_free(validConstraints);
 	list_free(invalidConstraints);
 	ReleaseSysCache(typeTuple);
 
-	PG_RETURN_TEXT_P(cstring_to_text(buf.data));
+	return buf.data;
 }
