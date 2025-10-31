@@ -13760,6 +13760,7 @@ get_formatted_string(StringInfo buf, int prettyFlags, int noOfTabChars, const ch
 
 	if (prettyFlags & PRETTYFLAG_INDENT)
 	{
+		appendStringInfoChar(buf, '\n');
 		/* Indent with tabs */
 		for (int i = 0; i < noOfTabChars; i++)
 		{
@@ -13772,10 +13773,6 @@ get_formatted_string(StringInfo buf, int prettyFlags, int noOfTabChars, const ch
 	va_start(args, fmt);
 	appendStringInfoVA(buf, fmt, args);
 	va_end(args);
-
-	/* If pretty mode, append newline at the end */
-	if (prettyFlags & PRETTYFLAG_INDENT)
-		appendStringInfoChar(buf, '\n');
 }
 
 
@@ -13833,10 +13830,10 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 	Oid			baseCollation = InvalidOid;
 	ListCell   *lc;
 
-	get_formatted_string(&buf, prettyFlags, 0, "CREATE DOMAIN %s.%s AS %s",
-						 quote_identifier(get_namespace_name(typForm->typnamespace)),
-						 quote_identifier(NameStr(typForm->typname)),
-						 format_type_be(typForm->typbasetype));
+	appendStringInfo(&buf, "CREATE DOMAIN %s.%s AS %s",
+					 quote_identifier(get_namespace_name(typForm->typnamespace)),
+					 quote_identifier(NameStr(typForm->typname)),
+					 format_type_be(typForm->typbasetype));
 
 	/* Add collation if it differs from base type's collation */
 	if (OidIsValid(typForm->typcollation))
@@ -13889,11 +13886,7 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 		ReleaseSysCache(constraintTup);
 	}
 
-	/* Replace '\n' with ';' if newline at the end */
-	if (buf.len > 0 && buf.data[buf.len - 1] == '\n')
-		buf.data[buf.len - 1] = ';';
-	else
-		appendStringInfoChar(&buf, ';');
+	appendStringInfoChar(&buf, ';');
 }
 
 /*
