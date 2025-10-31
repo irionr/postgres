@@ -13822,7 +13822,7 @@ scan_domain_constraints(Oid domain_oid, List **validcons, List **invalidcons)
  * Helper function to build CREATE DOMAIN statement
  */
 static void
-build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
+build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
 							  Node *defaultExpr, List *validConstraints, int prettyFlags)
 {
 	HeapTuple	baseTypeTuple;
@@ -13830,7 +13830,7 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 	Oid			baseCollation = InvalidOid;
 	ListCell   *lc;
 
-	appendStringInfo(&buf, "CREATE DOMAIN %s.%s AS %s",
+	appendStringInfo(buf, "CREATE DOMAIN %s.%s AS %s",
 					 quote_identifier(get_namespace_name(typForm->typnamespace)),
 					 quote_identifier(NameStr(typForm->typname)),
 					 format_type_be(typForm->typbasetype));
@@ -13850,7 +13850,7 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 		/* Only add COLLATE if domain's collation differs from base type's */
 		if (typForm->typcollation != baseCollation)
 		{
-			get_formatted_string(&buf, prettyFlags, 1, "COLLATE %s",
+			get_formatted_string(buf, prettyFlags, 1, "COLLATE %s",
 								 generate_collation_name(typForm->typcollation));
 		}
 	}
@@ -13860,7 +13860,7 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 	{
 		char	   *defaultValue = deparse_expression_pretty(defaultExpr, NIL, false, false, prettyFlags, 0);
 
-		get_formatted_string(&buf, prettyFlags, 1, "DEFAULT %s", defaultValue);
+		get_formatted_string(buf, prettyFlags, 1, "DEFAULT %s", defaultValue);
 	}
 
 	/* Add valid constraints */
@@ -13879,21 +13879,21 @@ build_create_domain_statement(StringInfoData buf, Form_pg_type typForm,
 		con = (Form_pg_constraint) GETSTRUCT(constraintTup);
 		constraintDef = pg_get_constraintdef_worker(constraintOid, false, prettyFlags, true);
 
-		get_formatted_string(&buf, prettyFlags, 1, "CONSTRAINT %s",
+		get_formatted_string(buf, prettyFlags, 1, "CONSTRAINT %s",
 							 quote_identifier(NameStr(con->conname)));
-		get_formatted_string(&buf, prettyFlags, 2, "%s", constraintDef);
+		get_formatted_string(buf, prettyFlags, 2, "%s", constraintDef);
 
 		ReleaseSysCache(constraintTup);
 	}
 
-	appendStringInfoChar(&buf, ';');
+	appendStringInfoChar(buf, ';');
 }
 
 /*
  * Helper function to add ALTER DOMAIN statements for invalid constraints
  */
 static void
-add_alter_domain_statements(StringInfoData buf, List *invalidConstraints, int prettyFlags)
+add_alter_domain_statements(StringInfo buf, List *invalidConstraints, int prettyFlags)
 {
 	ListCell   *lc;
 
@@ -13903,7 +13903,7 @@ add_alter_domain_statements(StringInfoData buf, List *invalidConstraints, int pr
 		char	   *alterStmt = pg_get_constraintdef_worker(constraintOid, true, prettyFlags, true);
 
 		if (alterStmt)
-			get_formatted_string(&buf, prettyFlags, 0, "\n%s;", alterStmt);
+			get_formatted_string(buf, prettyFlags, 0, "%s;", alterStmt);
 	}
 }
 
@@ -13968,11 +13968,11 @@ pg_get_domain_ddl_worker(Oid domain_oid, int prettyFlags)
 
 	/* Build the DDL statement */
 	initStringInfo(&buf);
-	build_create_domain_statement(buf, typForm, defaultExpr, validConstraints, prettyFlags);
+	build_create_domain_statement(&buf, typForm, defaultExpr, validConstraints, prettyFlags);
 
 	/* Add ALTER DOMAIN statements for invalid constraints */
 	if (list_length(invalidConstraints) > 0)
-		add_alter_domain_statements(buf, invalidConstraints, prettyFlags);
+		add_alter_domain_statements(&buf, invalidConstraints, prettyFlags);
 
 	/* Cleanup */
 	list_free(validConstraints);
