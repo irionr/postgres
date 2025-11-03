@@ -15,11 +15,49 @@ SELECT pg_get_domain_ddl('regress_us_postal_code');
  CREATE DOMAIN public.regress_us_postal_code AS text DEFAULT '00000'::text CONSTRAINT regress_us_postal_code_check CHECK (((VALUE ~ '^\d{5}$'::text) OR (VALUE ~ '^\d{5}-\d{4}$'::text)));
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_us_postal_code', pretty => false);
+                                                                                     pg_get_domain_ddl                                                                                     
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_us_postal_code AS text DEFAULT '00000'::text CONSTRAINT regress_us_postal_code_check CHECK (((VALUE ~ '^\d{5}$'::text) OR (VALUE ~ '^\d{5}-\d{4}$'::text)));
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_us_postal_code', false);
+                                                                                     pg_get_domain_ddl                                                                                     
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_us_postal_code AS text DEFAULT '00000'::text CONSTRAINT regress_us_postal_code_check CHECK (((VALUE ~ '^\d{5}$'::text) OR (VALUE ~ '^\d{5}-\d{4}$'::text)));
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_us_postal_code', pretty => true);
+                                 pg_get_domain_ddl                                 
+-----------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_us_postal_code AS text                              +
+         DEFAULT '00000'::text                                                    +
+         CONSTRAINT regress_us_postal_code_check                                  +
+                 CHECK (VALUE ~ '^\d{5}$'::text OR VALUE ~ '^\d{5}-\d{4}$'::text);
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_us_postal_code', true);
+                                 pg_get_domain_ddl                                 
+-----------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_us_postal_code AS text                              +
+         DEFAULT '00000'::text                                                    +
+         CONSTRAINT regress_us_postal_code_check                                  +
+                 CHECK (VALUE ~ '^\d{5}$'::text OR VALUE ~ '^\d{5}-\d{4}$'::text);
+(1 row)
+
 CREATE DOMAIN regress_domain_not_null AS INT NOT NULL;
 SELECT pg_get_domain_ddl('regress_domain_not_null');
                                                pg_get_domain_ddl                                               
 ---------------------------------------------------------------------------------------------------------------
  CREATE DOMAIN public.regress_domain_not_null AS integer CONSTRAINT regress_domain_not_null_not_null NOT NULL;
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_domain_not_null', pretty => true);
+                    pg_get_domain_ddl                    
+---------------------------------------------------------
+ CREATE DOMAIN public.regress_domain_not_null AS integer+
+         CONSTRAINT regress_domain_not_null_not_null    +
+                 NOT NULL;
 (1 row)
 
 CREATE DOMAIN regress_domain_check AS INT
@@ -31,6 +69,16 @@ SELECT pg_get_domain_ddl('regress_domain_check');
  CREATE DOMAIN public.regress_domain_check AS integer CONSTRAINT regress_a CHECK ((VALUE < 100)) CONSTRAINT regress_b CHECK ((VALUE > 10));
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_domain_check', pretty => true);
+                  pg_get_domain_ddl                   
+------------------------------------------------------
+ CREATE DOMAIN public.regress_domain_check AS integer+
+         CONSTRAINT regress_a                        +
+                 CHECK (VALUE < 100)                 +
+         CONSTRAINT regress_b                        +
+                 CHECK (VALUE > 10);
+(1 row)
+
 CREATE DOMAIN "regress_domain with space" AS INT
     CONSTRAINT regress_a CHECK (VALUE < 100)
     CONSTRAINT "regress_Constraint B" CHECK (VALUE > 10)
@@ -39,6 +87,18 @@ SELECT pg_get_domain_ddl('"regress_domain with space"');
                                                                                                    pg_get_domain_ddl                                                                                                   
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  CREATE DOMAIN public."regress_domain with space" AS integer CONSTRAINT regress_a CHECK ((VALUE < 100)) CONSTRAINT "regress_Constraint B" CHECK ((VALUE > 10)) CONSTRAINT "regress_ConstraintC" CHECK ((VALUE <> 55));
+(1 row)
+
+SELECT pg_get_domain_ddl('"regress_domain with space"', pretty => true);
+                      pg_get_domain_ddl                      
+-------------------------------------------------------------
+ CREATE DOMAIN public."regress_domain with space" AS integer+
+         CONSTRAINT regress_a                               +
+                 CHECK (VALUE < 100)                        +
+         CONSTRAINT "regress_Constraint B"                  +
+                 CHECK (VALUE > 10)                         +
+         CONSTRAINT "regress_ConstraintC"                   +
+                 CHECK (VALUE <> 55);
 (1 row)
 
 -- Test error cases
@@ -52,9 +112,21 @@ SELECT pg_get_domain_ddl(NULL);  -- should return NULL
  
 (1 row)
 
+SELECT pg_get_domain_ddl(NULL, pretty => true);  -- should return NULL
+ pg_get_domain_ddl 
+-------------------
+ 
+(1 row)
+
 -- Test domains with no constraints
 CREATE DOMAIN regress_simple_domain AS text;
 SELECT pg_get_domain_ddl('regress_simple_domain');
+                  pg_get_domain_ddl                  
+-----------------------------------------------------
+ CREATE DOMAIN public.regress_simple_domain AS text;
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_simple_domain', pretty => true);
                   pg_get_domain_ddl                  
 -----------------------------------------------------
  CREATE DOMAIN public.regress_simple_domain AS text;
@@ -69,6 +141,14 @@ SELECT pg_get_domain_ddl('regress_derived_domain');
  CREATE DOMAIN public.regress_derived_domain AS regress_base_domain CONSTRAINT regress_derived_domain_check CHECK ((length((VALUE)::text) > 3));
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_derived_domain', pretty => true);
+                         pg_get_domain_ddl                          
+--------------------------------------------------------------------
+ CREATE DOMAIN public.regress_derived_domain AS regress_base_domain+
+         CONSTRAINT regress_derived_domain_check                   +
+                 CHECK (length(VALUE::text) > 3);
+(1 row)
+
 -- Test domain with complex default expressions
 CREATE SEQUENCE regress_test_seq;
 CREATE DOMAIN regress_seq_domain AS int DEFAULT nextval('regress_test_seq');
@@ -76,6 +156,13 @@ SELECT pg_get_domain_ddl('regress_seq_domain');
                                          pg_get_domain_ddl                                         
 ---------------------------------------------------------------------------------------------------
  CREATE DOMAIN public.regress_seq_domain AS integer DEFAULT nextval('regress_test_seq'::regclass);
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_seq_domain', pretty => true);
+                   pg_get_domain_ddl                    
+--------------------------------------------------------
+ CREATE DOMAIN public.regress_seq_domain AS integer    +
+         DEFAULT nextval('regress_test_seq'::regclass);
 (1 row)
 
 -- Test domain with a renamed sequence as default expression
@@ -94,12 +181,27 @@ SELECT pg_get_domain_ddl('regress_precise_numeric');
  CREATE DOMAIN public.regress_precise_numeric AS numeric DEFAULT 0.00;
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_precise_numeric', pretty => true);
+                    pg_get_domain_ddl                    
+---------------------------------------------------------
+ CREATE DOMAIN public.regress_precise_numeric AS numeric+
+         DEFAULT 0.00;
+(1 row)
+
 -- Test domain over array type
 CREATE DOMAIN regress_int_array_domain AS int[] CHECK (array_length(VALUE, 1) <= 5);
 SELECT pg_get_domain_ddl('regress_int_array_domain');
                                                               pg_get_domain_ddl                                                              
 ---------------------------------------------------------------------------------------------------------------------------------------------
  CREATE DOMAIN public.regress_int_array_domain AS integer[] CONSTRAINT regress_int_array_domain_check CHECK ((array_length(VALUE, 1) <= 5));
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_int_array_domain', pretty => true);
+                     pg_get_domain_ddl                      
+------------------------------------------------------------
+ CREATE DOMAIN public.regress_int_array_domain AS integer[]+
+         CONSTRAINT regress_int_array_domain_check         +
+                 CHECK (array_length(VALUE, 1) <= 5);
 (1 row)
 
 -- Test domain in non-public schema
@@ -123,6 +225,19 @@ SELECT pg_get_domain_ddl('regress_comprehensive_domain');
  CREATE DOMAIN public.regress_comprehensive_domain AS character varying DEFAULT 'default_value'::character varying CONSTRAINT regress_comprehensive_domain_not_null NOT NULL CONSTRAINT regress_comprehensive_domain_check CHECK ((length((VALUE)::text) >= 5)) CONSTRAINT regress_comprehensive_domain_check1 CHECK (((VALUE)::text !~ '^\s*$'::text));
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_comprehensive_domain', pretty => true);
+                           pg_get_domain_ddl                            
+------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_comprehensive_domain AS character varying+
+         DEFAULT 'default_value'::character varying                    +
+         CONSTRAINT regress_comprehensive_domain_not_null              +
+                 NOT NULL                                              +
+         CONSTRAINT regress_comprehensive_domain_check                 +
+                 CHECK (length(VALUE::text) >= 5)                      +
+         CONSTRAINT regress_comprehensive_domain_check1                +
+                 CHECK (VALUE::text !~ '^\s*$'::text);
+(1 row)
+
 -- Test domain over composite type
 CREATE TYPE regress_address_type AS (street text, city text, zipcode text);
 CREATE DOMAIN regress_address_domain AS regress_address_type CHECK ((VALUE).zipcode ~ '^\d{5}$');
@@ -130,6 +245,14 @@ SELECT pg_get_domain_ddl('regress_address_domain');
                                                                     pg_get_domain_ddl                                                                     
 ----------------------------------------------------------------------------------------------------------------------------------------------------------
  CREATE DOMAIN public.regress_address_domain AS regress_address_type CONSTRAINT regress_address_domain_check CHECK (((VALUE).zipcode ~ '^\d{5}$'::text));
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_address_domain', pretty => true);
+                          pg_get_domain_ddl                          
+---------------------------------------------------------------------
+ CREATE DOMAIN public.regress_address_domain AS regress_address_type+
+         CONSTRAINT regress_address_domain_check                    +
+                 CHECK ((VALUE).zipcode ~ '^\d{5}$'::text);
 (1 row)
 
 -- Test domain with NOT VALID constraint
@@ -142,6 +265,13 @@ SELECT pg_get_domain_ddl('regress_domain_not_valid');
  ALTER DOMAIN public.regress_domain_not_valid ADD CONSTRAINT check_positive CHECK ((VALUE > 0)) NOT VALID;
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_domain_not_valid', pretty => true);
+                                            pg_get_domain_ddl                                            
+---------------------------------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_domain_not_valid AS integer;                                              +
+ ALTER DOMAIN public.regress_domain_not_valid ADD CONSTRAINT check_positive CHECK (VALUE > 0) NOT VALID;
+(1 row)
+
 -- Test domain with mix of valid and not valid constraints
 CREATE DOMAIN regress_domain_mixed AS int CHECK (VALUE != 0);
 ALTER DOMAIN regress_domain_mixed ADD CONSTRAINT check_range CHECK (VALUE BETWEEN 1 AND 100) NOT VALID;
@@ -152,12 +282,28 @@ SELECT pg_get_domain_ddl('regress_domain_mixed');
  ALTER DOMAIN public.regress_domain_mixed ADD CONSTRAINT check_range CHECK (((VALUE >= 1) AND (VALUE <= 100))) NOT VALID;
 (1 row)
 
+SELECT pg_get_domain_ddl('regress_domain_mixed', pretty => true);
+                                                 pg_get_domain_ddl                                                  
+--------------------------------------------------------------------------------------------------------------------
+ CREATE DOMAIN public.regress_domain_mixed AS integer                                                              +
+         CONSTRAINT regress_domain_mixed_check                                                                     +
+                 CHECK (VALUE <> 0);                                                                               +
+ ALTER DOMAIN public.regress_domain_mixed ADD CONSTRAINT check_range CHECK (VALUE >= 1 AND VALUE <= 100) NOT VALID;
+(1 row)
+
 -- Test domain with collation
 CREATE DOMAIN regress_domain_with_collate AS text COLLATE "C";
 SELECT pg_get_domain_ddl('regress_domain_with_collate');
                            pg_get_domain_ddl                           
 -----------------------------------------------------------------------
  CREATE DOMAIN public.regress_domain_with_collate AS text COLLATE "C";
+(1 row)
+
+SELECT pg_get_domain_ddl('regress_domain_with_collate', pretty => true);
+                    pg_get_domain_ddl                     
+----------------------------------------------------------
+ CREATE DOMAIN public.regress_domain_with_collate AS text+
+         COLLATE "C";
 (1 row)
 
 -- Cleanup
