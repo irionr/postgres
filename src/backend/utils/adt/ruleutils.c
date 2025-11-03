@@ -13907,7 +13907,7 @@ add_alter_domain_statements(StringInfo buf, List *invalidConstraints, int pretty
 		char	   *alterStmt = pg_get_constraintdef_worker(constraintOid, true, prettyFlags, true);
 
 		if (alterStmt)
-			get_formatted_string(buf, prettyFlags, 0, "%s;", alterStmt);
+			appendStringInfo(buf, "\n%s;", alterStmt);
 	}
 }
 
@@ -13923,7 +13923,6 @@ pg_get_domain_ddl_ext(PG_FUNCTION_ARGS)
 	int			prettyFlags;
 
 	prettyFlags = GET_DDL_PRETTY_FLAGS(pretty);
-	elog(WARNING, "pretty flags are %i", prettyFlags);
 
 	res = pg_get_domain_ddl_worker(domain_oid, prettyFlags);
 	if (res == NULL)
