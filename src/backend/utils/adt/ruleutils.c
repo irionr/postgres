@@ -94,6 +94,10 @@
 	((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT | PRETTYFLAG_SCHEMA) \
 	 : PRETTYFLAG_INDENT)
 
+#define GET_DDL_PRETTY_FLAGS(pretty) \
+	((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT | PRETTYFLAG_SCHEMA) \
+	: 0)
+
 /* Default line length for pretty-print wrapping: 0 means wrap always */
 #define WRAP_COLUMN_DEFAULT		0
 
@@ -13908,21 +13912,6 @@ add_alter_domain_statements(StringInfo buf, List *invalidConstraints, int pretty
 }
 
 /*
- * pg_get_domain_ddl - Get CREATE DOMAIN statement for a domain
- */
-Datum
-pg_get_domain_ddl(PG_FUNCTION_ARGS)
-{
-	Oid			domain_oid = PG_GETARG_OID(0);
-	char	   *res;
-
-	res = pg_get_domain_ddl_worker(domain_oid, 0);
-	if (res == NULL)
-		PG_RETURN_NULL();
-	PG_RETURN_TEXT_P(string_to_text(res));
-}
-
-/*
  * pg_get_domain_ddl_ext - Get CREATE DOMAIN statement for a domain with pretty-print option
  */
 Datum
@@ -13933,7 +13922,8 @@ pg_get_domain_ddl_ext(PG_FUNCTION_ARGS)
 	char	   *res;
 	int			prettyFlags;
 
-	prettyFlags = GET_PRETTY_FLAGS(pretty);
+	prettyFlags = GET_DDL_PRETTY_FLAGS(pretty);
+	elog(WARNING, "pretty flags are %i", prettyFlags);
 
 	res = pg_get_domain_ddl_worker(domain_oid, prettyFlags);
 	if (res == NULL)
