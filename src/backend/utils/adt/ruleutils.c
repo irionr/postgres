@@ -94,10 +94,6 @@
 	((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT | PRETTYFLAG_SCHEMA) \
 	 : PRETTYFLAG_INDENT)
 
-#define GET_DDL_PRETTY_FLAGS(pretty) \
-	((pretty) ? (PRETTYFLAG_PAREN | PRETTYFLAG_INDENT | PRETTYFLAG_SCHEMA) \
-	: 0)
-
 /* Default line length for pretty-print wrapping: 0 means wrap always */
 #define WRAP_COLUMN_DEFAULT		0
 
@@ -13922,7 +13918,7 @@ pg_get_domain_ddl_ext(PG_FUNCTION_ARGS)
 	char	   *res;
 	int			prettyFlags;
 
-	prettyFlags = GET_DDL_PRETTY_FLAGS(pretty);
+	prettyFlags = pretty ? GET_PRETTY_FLAGS(pretty) : 0;
 
 	res = pg_get_domain_ddl_worker(domain_oid, prettyFlags);
 	if (res == NULL)
