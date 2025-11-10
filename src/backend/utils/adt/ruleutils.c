@@ -13830,10 +13830,9 @@ build_create_domain_statement(StringInfo buf, Form_pg_type typForm,
 	Oid			baseCollation = InvalidOid;
 	ListCell   *lc;
 
-	appendStringInfo(buf, "CREATE DOMAIN %s.%s AS %s",
-					 quote_identifier(get_namespace_name(typForm->typnamespace)),
-					 quote_identifier(NameStr(typForm->typname)),
-					 format_type_be(typForm->typbasetype));
+	appendStringInfo(buf, "CREATE DOMAIN %s AS %s",
+					 generate_qualified_type_name(typForm->oid),
+					 generate_qualified_type_name(typForm->typbasetype));
 
 	/* Add collation if it differs from base type's collation */
 	if (OidIsValid(typForm->typcollation))
