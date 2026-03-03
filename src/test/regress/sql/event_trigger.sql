@@ -638,3 +638,21 @@ DROP POLICY pguc ON event_trigger_test;
 CREATE POLICY pguc ON event_trigger_test USING (FALSE);
 SET event_triggers = 'off';
 DROP POLICY pguc ON event_trigger_test;
+
+-- Test that EventTriggerCollectAlterTSConfig handles DROP MAPPING
+-- with ndicts=0, dictIds=NULL (the DROP MAPPING code path always
+-- passes NULL,0).  Previously crashed under UBSAN due to
+-- memcpy(dest, NULL, 0) being undefined behavior.
+CREATE FUNCTION noop_event_trigger() RETURNS event_trigger
+LANGUAGE plpgsql AS $$ BEGIN END; $$;
+CREATE EVENT TRIGGER noop_event_trigger ON ddl_command_end
+    EXECUTE FUNCTION noop_event_trigger();
+SET event_triggers = 'on';
+
+CREATE TEXT SEARCH CONFIGURATION evttrig_tscfg (COPY = pg_catalog.simple);
+ALTER TEXT SEARCH CONFIGURATION evttrig_tscfg
+    DROP MAPPING FOR word;
+
+DROP TEXT SEARCH CONFIGURATION evttrig_tscfg;
+DROP EVENT TRIGGER noop_event_trigger;
+DROP FUNCTION noop_event_trigger;
