@@ -2746,11 +2746,21 @@ CheckCertAuth(Port *port)
 			break;
 		case clientCertCN:
 			peer_username = port->peer_cn;
+			break;
+		case clientCertURI:
+			if (port->peer_uri_count <= 0)
+			{
+				ereport(LOG,
+						(errmsg("certificate authentication failed for user \"%s\": client certificate contains no URI subject alternative names",
+								port->user_name)));
+				return STATUS_ERROR;
+			}
+			break;
 	}
 
 	/* Make sure we have received a username in the certificate */
-	if (peer_username == NULL ||
-		strlen(peer_username) <= 0)
+	if (port->hba->clientcertname != clientCertURI &&
+		(peer_username == NULL || strlen(peer_username) <= 0))
 	{
 		ereport(LOG,
 				(errmsg("certificate authentication failed for user \"%s\": client certificate contains no user name",
@@ -2782,8 +2792,23 @@ CheckCertAuth(Port *port)
 		set_authn_id(port, port->peer_dn);
 	}
 
-	/* Just pass the certificate cn/dn to the usermap check */
-	status_check_usermap = check_usermap(port->hba->usermap, port->user_name, peer_username, false);
+	/*
+	 * Just pass the certificate cn/dn/uri to the correct usermap check. URI
+	 * SANs are multi-valued, so each URI is a candidate external identity.
+	 * The connection is authorized if any URI maps to the requested database
+	 * user.
+	 */
+	if (port->hba->clientcertname == clientCertURI)
+		status_check_usermap = check_usermap_any(port->hba->usermap,
+												 port->user_name,
+												 (const char **) port->peer_uris,
+												 port->peer_uri_count,
+												 false);
+	else
+		status_check_usermap = check_usermap(port->hba->usermap,
+											 port->user_name,
+											 peer_username,
+											 false);
 	if (status_check_usermap != STATUS_OK)
 	{
 		/*
@@ -2804,6 +2829,12 @@ CheckCertAuth(Port *port)
 					ereport(LOG,
 							(errmsg("certificate validation (clientcert=verify-full) failed for user \"%s\": CN mismatch",
 									port->user_name)));
+					break;
+				case clientCertURI:
+					ereport(LOG,
+							(errmsg("certificate validation (clientcert=verify-full) failed for user \"%s\": URI SAN mismatch",
+									port->user_name)));
+					break;
 			}
 		}
 	}

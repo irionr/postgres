@@ -35,7 +35,7 @@ SERVERS := server-cn-and-alt-names \
 	server-no-names \
 	server-revoked
 CLIENTS := client client-dn client-revoked client_ext client-long \
-	client-revoked-utf8
+	client-revoked-utf8 client-uri
 
 #
 # To add a new non-standard certificate, add it to SPECIAL_CERTS and then add

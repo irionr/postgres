@@ -106,6 +106,7 @@ static int	sni_clienthello_cb(SSL *ssl, int *al, void *arg);
 #endif
 
 static char *X509_NAME_to_cstring(const X509_NAME *name);
+static char *X509_URI_to_cstring(const ASN1_STRING *uri);
 
 static SSL_CTX *SSL_context = NULL;
 static MemoryContext SSL_hosts_memcxt = NULL;
@@ -1072,9 +1073,14 @@ aloop:
 	/* Get client certificate, if available. */
 	port->peer = SSL_get_peer_certificate(port->ssl);
 
-	/* and extract the Common Name and Distinguished Name from it. */
+	/*
+	 * and extract the Common Name, Distinguished Name, and Subject Alternate
+	 * Name from it.
+	 */
 	port->peer_cn = NULL;
 	port->peer_dn = NULL;
+	port->peer_uris = NULL;
+	port->peer_uri_count = 0;
 	port->peer_cert_valid = false;
 	if (port->peer != NULL)
 	{
@@ -1084,6 +1090,8 @@ aloop:
 		BIO		   *bio = NULL;
 		BUF_MEM    *bio_buf = NULL;
 		int			index;
+
+		STACK_OF(GENERAL_NAME) * peer_san;
 
 		index = X509_NAME_get_index_by_NID(unconstify(X509_NAME *, x509name), NID_commonName, -1);
 		if (index >= 0)
@@ -1168,6 +1176,58 @@ aloop:
 
 		port->peer_dn = peer_dn;
 
+		peer_san = (STACK_OF(GENERAL_NAME) *) X509_get_ext_d2i(port->peer, NID_subject_alt_name, NULL, NULL);
+
+		if (peer_san)
+		{
+			int			san_len = sk_GENERAL_NAME_num(peer_san);
+			int			num_san_uris = 0;
+			int			num_peer_uris = 0;
+			int			i;
+
+			for (i = 0; i < san_len; i++)
+			{
+				const GENERAL_NAME *name = sk_GENERAL_NAME_value(peer_san, i);
+
+				if (name->type == GEN_URI)
+					num_san_uris++;
+			}
+
+			if (num_san_uris > 0)
+			{
+				port->peer_uris = MemoryContextAllocZero(TopMemoryContext,
+														 num_san_uris * sizeof(char *));
+
+				for (i = 0; i < san_len; i++)
+				{
+					const GENERAL_NAME *name = sk_GENERAL_NAME_value(peer_san, i);
+
+					if (name->type == GEN_URI)
+					{
+						char	   *uri = X509_URI_to_cstring(name->d.uniformResourceIdentifier);
+
+						if (uri == NULL)
+						{
+							for (int j = 0; j < num_peer_uris; j++)
+								pfree(port->peer_uris[j]);
+
+							pfree(port->peer_uris);
+							port->peer_uris = NULL;
+							num_peer_uris = 0;
+
+							break;
+						}
+
+						port->peer_uris[num_peer_uris++] = uri;
+					}
+				}
+
+				port->peer_uri_count = num_peer_uris;
+			}
+
+			sk_GENERAL_NAME_pop_free(peer_san, GENERAL_NAME_free);
+		}
+
 		port->peer_cert_valid = true;
 	}
 
@@ -1201,6 +1261,18 @@ be_tls_close(Port *port)
 	{
 		pfree(port->peer_dn);
 		port->peer_dn = NULL;
+	}
+
+	if (port->peer_uris)
+	{
+		int			i;
+
+		for (i = 0; i < port->peer_uri_count; i++)
+			pfree(port->peer_uris[i]);
+
+		pfree(port->peer_uris);
+		port->peer_uris = NULL;
+		port->peer_uri_count = 0;
 	}
 }
 
@@ -2429,6 +2501,46 @@ X509_NAME_to_cstring(const X509_NAME *name)
 		pfree(dp);
 	if (BIO_free(membuf) != 1)
 		elog(ERROR, "could not free OpenSSL BIO structure");
+
+	return result;
+}
+
+/*
+ * Convert an X509 URI subjectAltName to a cstring.
+ */
+static char *
+X509_URI_to_cstring(const ASN1_STRING *uri)
+{
+	int			len;
+	const unsigned char *data;
+	char	   *result;
+
+	if (uri == NULL)
+	{
+		ereport(COMMERROR,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("SSL certificate's URI subject alternative name is invalid")));
+		return NULL;
+	}
+
+	len = ASN1_STRING_length(uri);
+	data = ASN1_STRING_get0_data(uri);
+	result = MemoryContextAlloc(TopMemoryContext, len + 1);
+	memcpy(result, data, len);
+	result[len] = '\0';
+
+	/*
+	 * Reject embedded NULLs in certificate URI SANs to prevent confusion
+	 * between PostgreSQL's cstring handling and the certificate contents.
+	 */
+	if (len != strlen(result))
+	{
+		pfree(result);
+		ereport(COMMERROR,
+				(errcode(ERRCODE_PROTOCOL_VIOLATION),
+				 errmsg("SSL certificate's URI subject alternative name contains embedded null")));
+		return NULL;
+	}
 
 	return result;
 }

@@ -75,6 +75,7 @@ typedef enum ClientCertName
 {
 	clientCertCN,
 	clientCertDN,
+	clientCertURI,
 } ClientCertName;
 
 /*
@@ -193,6 +194,11 @@ extern void hba_getauthmethod(Port *port);
 extern int	check_usermap(const char *usermap_name,
 						  const char *pg_user, const char *system_user,
 						  bool case_insensitive);
+extern int	check_usermap_any(const char *usermap_name,
+							  const char *pg_user,
+							  const char **system_users,
+							  int num_system_users,
+							  bool case_insensitive);
 extern HbaLine *parse_hba_line(TokenizedAuthLine *tok_line, int elevel);
 extern IdentLine *parse_ident_line(TokenizedAuthLine *tok_line, int elevel);
 extern FILE *open_auth_file(const char *filename, int elevel, int depth,
