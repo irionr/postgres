@@ -1007,6 +1007,32 @@ $node->connect_fails(
 		qr{Failed certificate data \(unverified\): subject "/CN=\\xce\\x9f\\xce\\xb4\\xcf\\x85\\xcf\\x83\\xcf\\x83\\xce\\xad\\xce\\xb1\\xcf\\x82", serial number \d+, issuer "/CN=Test CA for PostgreSQL SSL regression test client certs"},
 	]);
 
+# same thing but using URI subject alternative names
+my $uri_connstr = "$common_connstr dbname=certdb_uri";
+
+$node->connect_ok(
+    "$uri_connstr user=ssltestuser sslcert=ssl/client-uri.crt "
+      . sslkey('client-uri.key'),
+    "certificate authorization succeeds with URI SAN mapping",
+    # the full DN should still be used as the authenticated identity
+    log_like => [
+        qr/connection authenticated: identity="CN=ssltestuser" method=cert/
+    ],);
+
+$node->connect_fails(
+    "$uri_connstr user=anotheruser sslcert=ssl/client-uri.crt "
+      . sslkey('client-uri.key'),
+    "certificate authorization fails when no URI SAN maps to the requested user",
+    expected_stderr =>
+      qr/certificate authentication failed for user "anotheruser"/);
+
+$node->connect_fails(
+    "$uri_connstr user=ssltestuser sslcert=ssl/client.crt "
+      . sslkey('client.key'),
+    "certificate authorization fails when client certificate has no URI SAN",
+    expected_stderr =>
+      qr/certificate authentication failed for user "ssltestuser"/);
+
 SKIP:
 {
 	skip "sslmode require not supported in this build", 4

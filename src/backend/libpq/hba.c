@@ -2081,6 +2081,10 @@ parse_hba_auth_opt(char *name, char *val, HbaLine *hbaline,
 		{
 			hbaline->clientcertname = clientCertDN;
 		}
+		else if (strcmp(val, "URI") == 0)
+		{
+			hbaline->clientcertname = clientCertURI;
+		}
 		else
 		{
 			ereport(elevel,
@@ -2774,6 +2778,49 @@ check_ident_usermap(IdentLine *identLine, const char *usermap_name,
 }
 
 
+static int
+check_usermap_no_log(const char *usermap_name,
+					 const char *pg_user,
+					 const char *system_user,
+					 bool case_insensitive,
+					 bool *error_p)
+{
+	bool		found_entry = false;
+
+	*error_p = false;
+
+	if (usermap_name == NULL || usermap_name[0] == '\0')
+	{
+		if (case_insensitive)
+		{
+			if (pg_strcasecmp(pg_user, system_user) == 0)
+				return STATUS_OK;
+		}
+		else
+		{
+			if (strcmp(pg_user, system_user) == 0)
+				return STATUS_OK;
+		}
+
+		return STATUS_ERROR;
+	}
+	else
+	{
+		ListCell   *line_cell;
+
+		foreach(line_cell, parsed_ident_lines)
+		{
+			check_ident_usermap(lfirst(line_cell), usermap_name,
+								pg_user, system_user, case_insensitive,
+								&found_entry, error_p);
+			if (found_entry || *error_p)
+				break;
+		}
+	}
+
+	return found_entry ? STATUS_OK : STATUS_ERROR;
+}
+
 /*
  *	Scan the (pre-parsed) ident usermap file line by line, looking for a match
  *
@@ -2793,48 +2840,60 @@ check_usermap(const char *usermap_name,
 			  const char *system_user,
 			  bool case_insensitive)
 {
-	bool		found_entry = false,
-				error = false;
+	bool		error = false;
+	int			status;
 
-	if (usermap_name == NULL || usermap_name[0] == '\0')
+	status = check_usermap_no_log(usermap_name, pg_user, system_user,
+								  case_insensitive, &error);
+
+	if (status != STATUS_OK && !error)
 	{
-		if (case_insensitive)
-		{
-			if (pg_strcasecmp(pg_user, system_user) == 0)
-				return STATUS_OK;
-		}
+		if (usermap_name == NULL || usermap_name[0] == '\0')
+			ereport(LOG,
+					(errmsg("provided user name (%s) and authenticated user name (%s) do not match",
+							pg_user, system_user)));
 		else
-		{
-			if (strcmp(pg_user, system_user) == 0)
-				return STATUS_OK;
-		}
-		ereport(LOG,
-				(errmsg("provided user name (%s) and authenticated user name (%s) do not match",
-						pg_user, system_user)));
-		return STATUS_ERROR;
+			ereport(LOG,
+					(errmsg("no match in usermap \"%s\" for user \"%s\" authenticated as \"%s\"",
+							usermap_name, pg_user, system_user)));
 	}
-	else
-	{
-		ListCell   *line_cell;
 
-		foreach(line_cell, parsed_ident_lines)
-		{
-			check_ident_usermap(lfirst(line_cell), usermap_name,
-								pg_user, system_user, case_insensitive,
-								&found_entry, &error);
-			if (found_entry || error)
-				break;
-		}
-	}
-	if (!found_entry && !error)
-	{
-		ereport(LOG,
-				(errmsg("no match in usermap \"%s\" for user \"%s\" authenticated as \"%s\"",
-						usermap_name, pg_user, system_user)));
-	}
-	return found_entry ? STATUS_OK : STATUS_ERROR;
+	return status;
 }
 
+int
+check_usermap_any(const char *usermap_name,
+				  const char *pg_user,
+				  const char **system_users,
+				  int num_system_users,
+				  bool case_insensitive)
+{
+	bool		error = false;
+
+	for (int i = 0; i < num_system_users; i++)
+	{
+		if (check_usermap_no_log(usermap_name, pg_user, system_users[i],
+								 case_insensitive, &error) == STATUS_OK)
+			return STATUS_OK;
+
+		if (error)
+			break;
+	}
+
+	if (!error)
+	{
+		if (usermap_name == NULL || usermap_name[0] == '\0')
+			ereport(LOG,
+					(errmsg("provided user name (%s) does not match any authenticated user name",
+							pg_user)));
+		else
+			ereport(LOG,
+					(errmsg("no match in usermap \"%s\" for user \"%s\" authenticated by any candidate identity",
+							usermap_name, pg_user)));
+	}
+
+	return STATUS_ERROR;
+}
 
 /*
  * Read the ident config file and create a List of IdentLine records for

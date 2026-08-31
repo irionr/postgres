@@ -91,6 +91,7 @@ sub init
 		"client-der.key", "client-encrypted-pem.key",
 		"client-encrypted-der.key", "client-dn.key",
 		"client_ext.key", "client-long.key",
+		"client-revoked-utf8.key", "client-uri.key",
 		"client-revoked-utf8.key");
 	foreach my $keyfile (@keys)
 	{
