@@ -54,8 +54,8 @@ WAIT FOR LSN '<replaceable class="parameter">lsn</replaceable>'
    (<literal>standby_replay</literal>, <literal>standby_write</literal>,
    <literal>standby_flush</literal>), an error is also emitted if the
    server is promoted before the <parameter>lsn</parameter> is reached.
-   If <parameter>NO_THROW</parameter> is specified, the command returns
-   a status string instead of throwing errors.
+   If <parameter>NO_THROW</parameter> is specified, the command reports
+   these outcomes as a status string instead of raising an error.
   </para>
 
   <para>
@@ -172,6 +172,39 @@ WAIT FOR LSN '<replaceable class="parameter">lsn</replaceable>'
           running on the primary.  In this case the result status can be
           obtained from the return value.
          </para>
+
+         <para>
+          Use this option when <literal>timeout</literal> or
+          <literal>not in recovery</literal> is an expected result that the
+          application intends to handle, for example by retrying the wait,
+          reporting replication delay, or choosing another server for a
+          subsequent operation.  The command then returns the result as a
+          status, which the application must check before assuming that the
+          target <acronym>LSN</acronym> was reached.  Omit the option when
+          the application must not proceed unless the target
+          <acronym>LSN</acronym> is reached, so that an unsuccessful wait
+          stops normal execution with an error.
+         </para>
+
+         <para>
+          Returning a status also leaves an explicit transaction usable;
+          without this option, the corresponding error requires rolling back
+          the transaction, or rolling back to a savepoint, before further
+          commands can be issued.
+         </para>
+
+         <para>
+          This option changes only how <literal>timeout</literal> and
+          <literal>not in recovery</literal> are reported.  Other errors are
+          still raised.  That covers invalid input, such as a malformed
+          <acronym>LSN</acronym> or an unrecognized option value, and every
+          condition that is checked before the wait begins, such as
+          requesting <literal>primary_flush</literal> during recovery or
+          holding a lock while waiting for a standby
+          <acronym>LSN</acronym>.  The option also does not limit the
+          duration of the wait; specify <literal>TIMEOUT</literal> for that
+          purpose.
+         </para>
         </listitem>
        </varlistentry>
       </variablelist>
@@ -227,10 +260,16 @@ WAIT FOR LSN '<replaceable class="parameter">lsn</replaceable>'
   <para>
    <command>WAIT</command> must be executed as a top-level command.
    It cannot be executed from a function, procedure, or
-   <command>DO</command> block. It also requires that no active or
-   registered snapshot be held, and therefore cannot be used in contexts
-   where such a snapshot must remain active, including transactions running
-   at isolation levels higher than <literal>READ COMMITTED</literal>.
+   <command>DO</command> block.  It also cannot be executed while the
+   current transaction holds a snapshot.  <command>WAIT</command> itself
+   acquires none, so it can run before the first snapshot-taking statement
+   of a <literal>REPEATABLE READ</literal> or <literal>SERIALIZABLE</literal>
+   transaction, but not after it, and not while a cursor or an exported
+   snapshot holds one at any isolation level.  A snapshot held here could
+   delay replay, which <literal>standby_replay</literal> waits for and which
+   other standby modes can end up waiting for too.  That is also why
+   <command>WAIT</command> is a command rather than a function or a
+   procedure, which execute with one held.
   </para>
 
   <para>
@@ -279,7 +318,9 @@ WAIT FOR LSN '<replaceable class="parameter">lsn</replaceable>'
    <parameter>mode</parameter>. The <literal>standby_replay</literal> mode
    waits for the LSN to be replayed (applied to the database), which is
    useful to achieve read-your-writes consistency while using an async
-   replica for reads and the primary for writes. The
+   replica for reads and the primary for writes, provided that the target
+   <acronym>LSN</acronym> is at or after the end of the relevant write
+   transaction's <literal>COMMIT</literal> record on the primary. The
    <literal>standby_flush</literal> mode waits for the WAL to be flushed
    to durable storage on the replica, or to have already been replayed
    from WAL present on the standby. The <literal>standby_write</literal> mode
@@ -337,9 +378,13 @@ WAIT FOR LSN '<replaceable class="parameter">lsn</replaceable>'
   <para>
    You can use the <command>WAIT</command> command to wait for
    the <type>pg_lsn</type> value.  For example, an application could update
-   the <literal>movie</literal> table and get the <acronym>lsn</acronym> after
-   changes just made.  This example uses <function>pg_current_wal_insert_lsn</function>
-   on primary server to get the <acronym>lsn</acronym> given that
+   the <literal>movie</literal> table and get an <acronym>lsn</acronym> that
+   is at or after the end of the relevant write transaction's
+   <literal>COMMIT</literal> record.  In the default autocommit mode shown
+   here, the <command>UPDATE</command> commits before the subsequent
+   <command>SELECT</command>.  This example uses
+   <function>pg_current_wal_insert_lsn</function> on primary server to get
+   the <acronym>lsn</acronym> given that
    <varname>synchronous_commit</varname> could be set to
    <literal>off</literal>.
 
@@ -354,8 +399,9 @@ postgres=# SELECT pg_current_wal_insert_lsn();
 </programlisting>
 
    Then an application could run <command>WAIT</command>
-   with the <parameter>lsn</parameter> obtained from primary.  After that the
-   changes made on primary should be guaranteed to be visible on replica.
+   with the <parameter>lsn</parameter> obtained from the primary after the
+   commit.  After that, the changes made on the primary should be guaranteed
+   to be visible on the replica.
 
 <programlisting>
 postgres=# WAIT FOR LSN '0/0306EE20';

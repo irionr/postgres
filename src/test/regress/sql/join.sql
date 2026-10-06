@@ -2746,6 +2746,47 @@ from (select case when false then remov.id else (select i41.f1) end as c1
       from int4_tbl i41 left join a remov on i41.f1 = remov.id) ss1
      right join int4_tbl i42 on true;
 
+-- likewise, where the pushed-down PHV sits within an outer-level aggregate
+explain (verbose, costs off)
+select (select sum(ss1.c1) from int4_tbl i43) as c2
+from (select (select i41.f1) as c1 from int4_tbl i41) ss1
+     right join int4_tbl i42 on true;
+
+-- likewise, where the pushed-down PHV's expression contains another PHV of
+-- the same level, which must not be preprocessed separately from its parent
+explain (verbose, costs off)
+select ss3.c2
+from int4_tbl i41
+     left join (select coalesce(ss1.c1, 0) as c1
+                from int4_tbl i42
+                     left join (select (select i43.f1) as c1
+                                from int4_tbl i43) ss1 on true) ss2
+       on true,
+     lateral (select ss2.c1 as c2 from int4_tbl i44 offset 0) ss3;
+
+-- likewise, where the PHV copy is only inserted into the LATERAL subquery by
+-- expanding a join alias Var of the outer level
+explain (verbose, costs off)
+select ss2.c2
+from ((select (select i41.f1) as c1 from int4_tbl i41) ss1
+      full join int4_tbl i42(c1) using (c1)) j,
+     lateral (select j.c1 as c2 from int4_tbl i43 offset 0) ss2;
+
+-- likewise, where the join alias is expanded within a SubLink's subselect
+explain (verbose, costs off)
+select (select j.c1 from int4_tbl i43 offset 0) as c2
+from ((select (select i41.f1) as c1 from int4_tbl i41) ss1
+      full join int4_tbl i42(c1) using (c1)) j;
+
+-- likewise, where the SubLink holding the copy ends up in the translated
+-- Vars of an appendrel child pulled up from a LATERAL UNION ALL subquery
+explain (verbose, costs off)
+select ss2.c2
+from (select case when false then remov.id end as c1
+      from int4_tbl i41 left join a remov on i41.f1 = remov.id) ss1
+     right join int4_tbl i42 on true,
+     lateral ((select (select ss1.c1) as c2) union all (select (select ss1.c1))) ss2;
+
 -- More tests of correct placement of pseudoconstant quals
 
 -- simple constant-false condition
@@ -2865,6 +2906,10 @@ explain (costs off)
 select c.id, ss.a from c
   left join (select d.a from onerow, d left join b on d.a = b.id) ss
   on c.id = ss.a;
+
+-- check join removal when Vars reference the removed join via its alias
+explain (verbose, costs off)
+select j.b_id, (select j.b_id) from (a left join b on a.b_id = b.id) j;
 
 -- check the case when the placeholder relates to an outer join and its
 -- inner in the press field but actually uses only the outer side of the join
@@ -3926,6 +3971,32 @@ select * from
   int8_tbl a left join
   lateral (select *, coalesce(a.q2, 42) as x from int8_tbl b) ss on a.q2 = ss.q1;
 
+-- check EC-derived clauses for a UNION ALL member with nullable lateral refs
+explain (costs off)
+select * from
+  int8_tbl x left join int8_tbl y on x.q2 = y.q1,
+  lateral (select x.q1 as v union all select x.q1 + y.q2) ss
+where x.q2 = ss.v;
+select * from
+  int8_tbl x left join int8_tbl y on x.q2 = y.q1,
+  lateral (select x.q1 as v union all select x.q1 + y.q2) ss
+where x.q2 = ss.v;
+
+-- likewise when the member is scanned below the outer join nulling those refs
+explain (costs off)
+select * from
+  int8_tbl x left join int8_tbl y on true
+  left join (int8_tbl z join
+             lateral (select z.q1 as v union all select y.q1 + z.q1) ss
+             on z.q2 = ss.v)
+    on y.q1 = 1;
+select * from
+  int8_tbl x left join int8_tbl y on true
+  left join (int8_tbl z join
+             lateral (select z.q1 as v union all select y.q1 + z.q1) ss
+             on z.q2 = ss.v)
+    on y.q1 = 1;
+
 -- lateral can result in join conditions appearing below their
 -- real semantic level
 explain (verbose, costs off)
@@ -4065,6 +4136,39 @@ lateral (select * from int8_tbl t1,
                                      where q2 = (select greatest(t1.q1,t2.q2))
                                        and (select v.id=0)) offset 0) ss2) ss
          where t1.q1 = ss.q2) ss0;
+
+-- check that lateral references hidden in a whole-row join alias Var
+-- prevent pullup of a LATERAL subquery
+explain (verbose, costs off)
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+select i4.f1, ss.x, i8.q1
+from int4_tbl i4,
+  lateral (select (j is null)::int
+           from ((select i4.f1) s left join (select 1) v on false) j) ss(x)
+  left join int8_tbl i8 on ss.x = i8.q1
+order by 1;
+
+-- same, with the lateral reference hidden in the subquery's quals
+explain (verbose, costs off)
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
+select i4.f1, i8.q1, ss.y
+from int4_tbl i4,
+  int8_tbl i8 left join
+  lateral (select 1 from ((select i4.f1) s left join (select 1) v on false) j
+           where length(j::text) > 3) ss(y) on true
+where i4.f1 = 0
+order by 1, 2;
 
 -- test some error cases where LATERAL should have been used but wasn't
 select f1,g from int4_tbl a, (select f1 as g) ss;

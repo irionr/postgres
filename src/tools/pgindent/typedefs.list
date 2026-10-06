@@ -30,8 +30,6 @@ AddForeignUpdateTargets_function
 AddrInfo
 AffixNode
 AffixNodeData
-AfterTriggerBatchCallback
-AfterTriggerCallbackItem
 AfterTriggerEvent
 AfterTriggerEventChunk
 AfterTriggerEventData
@@ -868,6 +866,7 @@ First
 FixedParallelExecutorState
 FixedParallelState
 FixedParamState
+Fitness
 FlagMode
 Float
 FlushPosition
@@ -2500,8 +2499,6 @@ RIX
 RI_CompareHashEntry
 RI_CompareKey
 RI_ConstraintInfo
-RI_FastPathEntry
-RI_FastPathKey
 RI_FastPathState
 RI_QueryHashEntry
 RI_QueryKey
@@ -4356,7 +4353,6 @@ timeout_handler_proc
 timeout_params
 timerCA
 tlist_vinfo
-toast_compress_header
 toast_external_data
 tokenize_error_callback_arg
 transferMode

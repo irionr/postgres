@@ -18,6 +18,7 @@
 #include "access/heapam.h"
 #include "access/heaptoast.h"
 #include "access/table.h"
+#include "access/toast_compression.h"
 #include "access/toast_internals.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
@@ -28,6 +29,26 @@
 
 static bool toastrel_valueid_exists(Relation toastrel, Oid8 valueid);
 static bool toastid_valueid_exists(Oid toastrelid, Oid8 valueid);
+
+/* ----------
+ * toast_pointer_build -
+ *
+ *	Build an on-disk TOAST pointer datum based on the given tag from "ptr",
+ *	itself a varatt_external_*.
+ * ----------
+ */
+static inline varlena *
+toast_pointer_build(vartag_external tag, const void *ptr)
+{
+	varlena    *result;
+
+	result = (varlena *) palloc(VARHDRSZ_EXTERNAL + VARTAG_SIZE(tag));
+	SET_VARTAG_EXTERNAL(result, tag);
+	Assert(VARATT_IS_EXTERNAL_ONDISK(result));
+	memcpy(VARDATA_EXTERNAL(result), ptr, VARTAG_SIZE(tag));
+
+	return result;
+}
 
 /* ----------
  * toast_compress_datum -
@@ -92,7 +113,7 @@ toast_compress_datum(Datum value, char cmethod)
 	{
 		/* successful compression */
 		Assert(cmid != TOAST_INVALID_COMPRESSION_ID);
-		TOAST_COMPRESS_SET_SIZE_AND_COMPRESS_METHOD(tmp, valsize, cmid);
+		VARDATA_COMPRESSED_SET_TCINFO(tmp, valsize, cmid);
 		return PointerGetDatum(tmp);
 	}
 	else
@@ -390,9 +411,7 @@ toast_save_datum(Relation rel, Datum value,
 		VARATT_EXTERNAL_OID8_SET_VALUEID(&toast_pointer, va_valueid);
 		toast_pointer.va_toastrelid = va_toastrelid;
 
-		result = (varlena *) palloc(TOAST_OID8_POINTER_SIZE);
-		SET_VARTAG_EXTERNAL(result, VARTAG_ONDISK_OID8);
-		memcpy(VARDATA_EXTERNAL(result), &toast_pointer, sizeof(toast_pointer));
+		result = toast_pointer_build(VARTAG_ONDISK_OID8, &toast_pointer);
 	}
 	else
 	{
@@ -403,9 +422,7 @@ toast_save_datum(Relation rel, Datum value,
 		toast_pointer.va_valueid = (Oid) va_valueid;
 		toast_pointer.va_toastrelid = va_toastrelid;
 
-		result = (varlena *) palloc(TOAST_OID_POINTER_SIZE);
-		SET_VARTAG_EXTERNAL(result, VARTAG_ONDISK_OID);
-		memcpy(VARDATA_EXTERNAL(result), &toast_pointer, sizeof(toast_pointer));
+		result = toast_pointer_build(VARTAG_ONDISK_OID, &toast_pointer);
 	}
 
 	return PointerGetDatum(result);
@@ -454,9 +471,9 @@ toast_delete_datum(Relation rel, Datum value, bool is_speculative)
 		return;
 
 	/*
-	 * Decode the pointer to get the toast relation OID and value ID. The
-	 * vartag tells us everything we need - no TOAST table schema lookup
-	 * required.
+	 * Decode the pointer to get the toast relation OID and value ID.  The
+	 * vartag tells us everything we need; no lookup of the TOAST table
+	 * definition lookup is required.
 	 */
 	toast_external_info_get(attr, &toast_ext_data);
 

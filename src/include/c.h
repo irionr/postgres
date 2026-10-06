@@ -76,6 +76,9 @@
 #if defined(WIN32) || defined(__CYGWIN__)
 #include <fcntl.h>				/* ensure O_BINARY is available */
 #endif
+#ifdef _MSC_VER
+#include <sal.h>
+#endif
 #include <locale.h>
 #ifdef HAVE_XLOCALE_H
 #include <xlocale.h>
@@ -275,6 +278,22 @@ extern "C++"
 #endif
 
 /*
+ * Place this macro before functions that intentionally call through a
+ * function pointer whose type does not exactly match the called function.
+ * The prime examples are the expression tree walkers and mutators, which are
+ * declared with their own concrete node and context types and cast to a
+ * generic signature.  That is, strictly speaking, undefined behavior, but it
+ * is a convenient convention that works in practice.  See also
+ * -Wno-cast-function-type-strict, which disables the corresponding
+ * compile-time warning.
+ */
+#ifdef __clang__
+#define pg_attribute_no_sanitize_function() __attribute__((no_sanitize("function")))
+#else
+#define pg_attribute_no_sanitize_function()
+#endif
+
+/*
  * pg_attribute_nonnull means the compiler should warn if the function is
  * called with the listed arguments set to NULL.  If no arguments are
  * listed, the compiler should warn if any pointer arguments are set to NULL.
@@ -295,6 +314,37 @@ extern "C++"
 #define pg_attribute_target(...) __attribute__((target(__VA_ARGS__)))
 #else
 #define pg_attribute_target(...)
+#endif
+
+/*
+ * pg_attribute_counted_by specifies that a flexible array member is "counted
+ * by" another struct member.  This allows the compiler to improve detection
+ * of object size information and to provide better results in compile-time
+ * diagnostics and run-time features, such as the array bounds sanitizer.
+ *
+ * Using this annotation comes with additional responsibilities:
+ *
+ * - The count must be assigned before the first reference to the array.
+ * - The array must have at least count elements available at all times,
+ *   including after either member is updated.
+ *
+ * The attribute is ignored in C++ due to lack of compiler support.
+ *
+ * MSVC has no counted_by attribute, but the equivalent SAL annotation
+ * _Field_size_() is understood by its static analyzer (/analyze); in ordinary
+ * builds it expands to nothing.  (C++ would be supported here, but we leave
+ * it off for consistency with the other compilers.)
+ */
+#ifndef __cplusplus
+#if __has_attribute (counted_by)
+#define pg_attribute_counted_by(count) __attribute__((counted_by(count)))
+#elif defined(_MSC_VER)
+#define pg_attribute_counted_by(count) _Field_size_(count)
+#else
+#define pg_attribute_counted_by(count)
+#endif
+#else
+#define pg_attribute_counted_by(count)
 #endif
 
 /*
@@ -692,7 +742,6 @@ typedef uint64_t uint64;
 /* snprintf format strings to use for 64-bit integers */
 #define INT64_FORMAT "%" PRId64
 #define UINT64_FORMAT "%" PRIu64
-#define OID8_FORMAT "%" PRIu64
 
 /*
  * 128-bit signed and unsigned integers
